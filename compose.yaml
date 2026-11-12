@@ -21,6 +21,41 @@ services:
       timeout: 5s
       retries: 5
 
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    container_name: veridt_mailpit
+    restart: always
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - veridt-net
+
+  # Armazenamento de arquivos pela API S3 (P3). O MinIO comunitário foi descontinuado e não publica mais imagens.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.53
+    container_name: veridt_seaweedfs
+    restart: always
+    command: server -s3 -dir=/data
+    environment:
+      # Sem credenciais o S3 do SeaweedFS fica aberto a qualquer um: por isso há padrões de desenvolvimento.
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-veridt}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-veridt-dev-secret}
+    ports:
+      - "8333:8333"
+    volumes:
+      - seaweedfs_data:/data
+    networks:
+      - veridt-net
+    # O S3 responde antes de aceitar gravações: o master ainda elege o líder. /dir/assign só responde quando já é
+    # possível gravar.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- \"http://$$(hostname -i):9333/dir/assign\" | grep -q fid"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   backend:
     build:
       context: .
@@ -34,14 +69,48 @@ services:
       - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
       - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      - SPRING_MAIL_HOST=mailpit
+      - SPRING_MAIL_PORT=1025
+      - MAIL_FROM=${MAIL_FROM:-no-reply@veridt.local}
+      - MAIL_THREADS=${MAIL_THREADS:-2}
+      - MAIL_SENSITIVE_CLEANUP_INTERVAL=${MAIL_SENSITIVE_CLEANUP_INTERVAL:-PT5M}
+      - RESET_URL=${RESET_URL:-http://localhost:3000/redefinir-senha}
+      - RESET_TOKEN_VALIDITY=${RESET_TOKEN_VALIDITY:-15m}
+      - PASSWORD_MIN_LENGTH=${PASSWORD_MIN_LENGTH:-8}
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-veridt}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-veridt-dev-secret}
+      - S3_BUCKET=${S3_BUCKET:-veridt-arquivos}
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+      seaweedfs:
+        condition: service_healthy
+    networks:
+      - veridt-net
+
+  # SPA (repositório separado). O nginx serve a SPA e encaminha /api e /ws para o backend nesta rede, então o navegador
+  # fala com uma única origem: o cookie de sessão e o CSRF funcionam sem CORS.
+  frontend:
+    build:
+      # Padrão: repositórios clonados lado a lado. Em outro lugar, defina FRONTEND_PATH no .env.
+      context: ${FRONTEND_PATH:-../-MATA62---ENGENHARIA-DE-SOFTWARE-I-frontend}
+    image: veridt-frontend
+    container_name: veridt_frontend
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_started
     networks:
       - veridt-net
 
 volumes:
   postgres_data:
+  seaweedfs_data:
 
 networks:
   veridt-net:
