@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -97,6 +95,7 @@ services:
     build:
       # Padrão: repositórios clonados lado a lado. Em outro lugar, defina FRONTEND_PATH no .env.
       context: ${FRONTEND_PATH:-../-MATA62---ENGENHARIA-DE-SOFTWARE-I-frontend}
+      dockerfile: docker/Dockerfile
     image: veridt-frontend
     container_name: veridt_frontend
     restart: always
