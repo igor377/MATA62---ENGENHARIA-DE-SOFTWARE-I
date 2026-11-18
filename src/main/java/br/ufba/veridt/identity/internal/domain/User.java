@@ -40,6 +40,10 @@ public class User {
 	@Column(name = "criado_em", nullable = false)
 	private Instant createdAt;
 
+	/** Nulo até o usuário confirmar o e-mail; sem confirmação o login é recusado. */
+	@Column(name = "email_confirmado_em")
+	private Instant emailConfirmedAt;
+
 	protected User() {
 	}
 
@@ -64,6 +68,17 @@ public class User {
 
 	public void changePassword(String newPasswordHash) {
 		this.passwordHash = newPasswordHash;
+	}
+
+	/** Mantém a primeira data: confirmar de novo não altera nada. */
+	public void confirmEmail(Instant now) {
+		if (emailConfirmedAt == null) {
+			emailConfirmedAt = now;
+		}
+	}
+
+	public boolean isEmailConfirmed() {
+		return emailConfirmedAt != null;
 	}
 
 	public UUID getId() {

@@ -2,15 +2,17 @@ package br.ufba.veridt.identity;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import br.ufba.veridt.identity.internal.domain.OabRegistrationType;
-import br.ufba.veridt.identity.internal.domain.Uf;
 import br.ufba.veridt.identity.internal.domain.UserType;
 import br.ufba.veridt.identity.internal.dto.OabRegistrationRequest;
 import br.ufba.veridt.identity.internal.dto.RegisterUserRequest;
+import br.ufba.veridt.shared.validation.Uf;
 import jakarta.servlet.http.Cookie;
 
 /** Dados válidos para testes. Os CPFs são gerados com os dígitos verificadores corretos. */
@@ -35,6 +37,11 @@ final class TestData {
 			request.addHeader("X-XSRF-TOKEN", token);
 			return request;
 		};
+	}
+
+	/** Atalho para testes que só precisam logar: marca o e-mail como confirmado direto no banco. */
+	static void confirmarEmail(JdbcTemplate jdbc, String email) {
+		jdbc.update("UPDATE usuario SET email_confirmado_em = now() WHERE email = ?", email.toLowerCase(Locale.ROOT));
 	}
 
 	static String cpf(String nineDigits) {

@@ -31,26 +31,31 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import br.ufba.veridt.TestcontainersConfiguration;
+import br.ufba.veridt.identity.internal.domain.EmailConfirmationToken;
 import br.ufba.veridt.identity.internal.domain.OabRegistrationType;
 import br.ufba.veridt.identity.internal.domain.PasswordResetToken;
-import br.ufba.veridt.identity.internal.domain.Uf;
 import br.ufba.veridt.identity.internal.domain.User;
 import br.ufba.veridt.identity.internal.dto.OabRegistrationResponse;
 import br.ufba.veridt.identity.internal.dto.ResetPasswordRequest;
 import br.ufba.veridt.identity.internal.dto.UserResponse;
 import br.ufba.veridt.identity.internal.exception.CpfAlreadyRegisteredException;
 import br.ufba.veridt.identity.internal.exception.EmailAlreadyRegisteredException;
+import br.ufba.veridt.identity.internal.exception.InvalidConfirmationTokenException;
 import br.ufba.veridt.identity.internal.exception.InvalidResetTokenException;
 import br.ufba.veridt.identity.internal.exception.OabAlreadyRegisteredException;
+import br.ufba.veridt.identity.internal.repository.EmailConfirmationTokenRepository;
 import br.ufba.veridt.identity.internal.repository.OabRegistrationRepository;
 import br.ufba.veridt.identity.internal.repository.PasswordResetTokenRepository;
 import br.ufba.veridt.identity.internal.repository.UserRepository;
+import br.ufba.veridt.identity.internal.service.EmailConfirmationService;
 import br.ufba.veridt.identity.internal.service.PasswordResetService;
 import br.ufba.veridt.identity.internal.service.RegistrationService;
+import br.ufba.veridt.identity.internal.service.UnconfirmedAccountCleanup;
 import br.ufba.veridt.notification.EmailRequested;
 import br.ufba.veridt.notification.EmailType;
 import br.ufba.veridt.shared.audit.AuditLog;
 import br.ufba.veridt.shared.audit.AuditRepository;
+import br.ufba.veridt.shared.validation.Uf;
 import jakarta.validation.ConstraintViolationException;
 
 @ApplicationModuleTest
@@ -75,11 +80,16 @@ class IdentityModuleTests {
 	private final JdbcTemplate jdbc;
 	private final TransactionTemplate transaction;
 	private final EmailRecorder emails;
+	private final EmailConfirmationService emailConfirmation;
+	private final EmailConfirmationTokenRepository confirmationTokens;
+	private final UnconfirmedAccountCleanup cleanup;
 
 	IdentityModuleTests(RegistrationService registration, PasswordResetService passwordReset, UserRepository users,
 			OabRegistrationRepository oabRegistrations, PasswordResetTokenRepository tokens,
 			PasswordEncoder passwordEncoder, FindByIndexNameSessionRepository<? extends Session> sessions,
-			JdbcTemplate jdbc, PlatformTransactionManager transactionManager, EmailRecorder emails) {
+			JdbcTemplate jdbc, PlatformTransactionManager transactionManager, EmailRecorder emails,
+			EmailConfirmationService emailConfirmation, EmailConfirmationTokenRepository confirmationTokens,
+			UnconfirmedAccountCleanup cleanup) {
 		this.registration = registration;
 		this.passwordReset = passwordReset;
 		this.users = users;
@@ -90,6 +100,9 @@ class IdentityModuleTests {
 		this.jdbc = jdbc;
 		this.transaction = new TransactionTemplate(transactionManager);
 		this.emails = emails;
+		this.emailConfirmation = emailConfirmation;
+		this.confirmationTokens = confirmationTokens;
+		this.cleanup = cleanup;
 	}
 
 	@BeforeEach
@@ -407,6 +420,134 @@ class IdentityModuleTests {
 			.isInstanceOf(ConstraintViolationException.class);
 	}
 
+	// ID-08: confirmação de e-mail
+
+	@Test
+	void cadastroEnviaConfirmacaoEGuardaSoOHashDoToken() {
+		UserResponse ana = registration.register(TestData.comum("Ana@Exemplo.com", CPF_ANA));
+
+		EmailRequested email = emails.confirmations().getFirst();
+		assertThat(email.recipient()).isEqualTo("ana@exemplo.com");
+		assertThat(email.parameters()).containsEntry("nome", "Ana Souza").containsEntry("validadeHoras", "24");
+		String token = tokenDaConfirmacao(email);
+		EmailConfirmationToken salvo = confirmationTokens.findAll().getFirst();
+		assertThat(salvo.getTokenHash()).isEqualTo(sha256(token)).isNotEqualTo(token);
+		assertThat(salvo.getUserId()).isEqualTo(ana.id());
+		assertThat(salvo.getExpiresAt()).isBetween(Instant.now().plusSeconds(23 * 3600), Instant.now().plusSeconds(24 * 3600));
+		assertThat(users.findById(ana.id()).orElseThrow().isEmailConfirmed()).isFalse();
+	}
+
+	@Test
+	void cadastroDesfeitoNaoEnviaConfirmacao() {
+		transaction.executeWithoutResult(status -> {
+			registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+			status.setRollbackOnly();
+		});
+
+		assertThat(emails.confirmations()).isEmpty();
+		assertThat(confirmationTokens.count()).isZero();
+	}
+
+	@Test
+	void confirmacaoMarcaOEmailEInvalidaOToken() {
+		UserResponse ana = registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+		String token = tokenDaConfirmacao(emails.confirmations().getFirst());
+
+		emailConfirmation.confirm(token);
+
+		assertThat(users.findById(ana.id()).orElseThrow().isEmailConfirmed()).isTrue();
+		assertThatThrownBy(() -> emailConfirmation.confirm(token)).isInstanceOf(InvalidConfirmationTokenException.class);
+	}
+
+	@Test
+	void confirmacaoComTokenExpiradoOuInexistenteERecusada() {
+		UserResponse ana = registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+		Instant passado = Instant.now().minus(Duration.ofDays(2));
+		confirmationTokens.save(
+				new EmailConfirmationToken(ana.id(), sha256("expirado"), passado, passado.plus(Duration.ofDays(1))));
+
+		assertThatThrownBy(() -> emailConfirmation.confirm("expirado"))
+			.isInstanceOf(InvalidConfirmationTokenException.class)
+			.hasMessage("Link de confirmação de e-mail inválido ou expirado.");
+		assertThatThrownBy(() -> emailConfirmation.confirm("inexistente"))
+			.isInstanceOf(InvalidConfirmationTokenException.class);
+		assertThat(users.findById(ana.id()).orElseThrow().isEmailConfirmed()).isFalse();
+	}
+
+	@Test
+	void reenvioRespeitaOIntervaloEInvalidaOTokenAnterior() {
+		UserResponse ana = registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+		String primeiro = tokenDaConfirmacao(emails.confirmations().getFirst());
+
+		emailConfirmation.resend("ana@exemplo.com");
+		await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(2))
+			.until(() -> emails.confirmations().size() == 1);
+
+		jdbc.update("UPDATE token_confirmacao_email SET criado_em = criado_em - INTERVAL '2 minutes' WHERE usuario_id = ?",
+				ana.id());
+		emailConfirmation.resend("ANA@exemplo.com");
+		await().atMost(ESPERA).until(() -> emails.confirmations().size() == 2);
+		String segundo = tokenDaConfirmacao(emails.confirmations().get(1));
+
+		assertThatThrownBy(() -> emailConfirmation.confirm(primeiro)).isInstanceOf(InvalidConfirmationTokenException.class);
+		emailConfirmation.confirm(segundo);
+	}
+
+	@Test
+	void reenvioParaEmailInexistenteOuJaConfirmadoNaoFazNada() {
+		registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+		emailConfirmation.confirm(tokenDaConfirmacao(emails.confirmations().getFirst()));
+		jdbc.update("UPDATE token_confirmacao_email SET criado_em = criado_em - INTERVAL '2 minutes'");
+
+		emailConfirmation.resend("ana@exemplo.com");
+		emailConfirmation.resend("ninguem@exemplo.com");
+
+		await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(2))
+			.until(() -> emails.confirmations().size() == 1);
+	}
+
+	@Test
+	void redefinirASenhaConfirmaOEmail() {
+		UserResponse ana = registration.register(TestData.comum("ana@exemplo.com", CPF_ANA));
+		String token = tokenDoLink(pedirRecuperacao("ana@exemplo.com"));
+
+		passwordReset.resetPassword(new ResetPasswordRequest(token, "Nova#Senha2"));
+
+		assertThat(users.findById(ana.id()).orElseThrow().isEmailConfirmed()).isTrue();
+	}
+
+	@Test
+	void limpezaApagaSoContasNaoConfirmadasAntigas() {
+		UserResponse antiga = registration.register(TestData.comum("antiga@exemplo.com", CPF_ANA));
+		UserResponse recente = registration.register(TestData.comum("recente@exemplo.com", CPF_BRUNO));
+		UserResponse confirmada = registration.register(TestData.comum("confirmada@exemplo.com", CPF_CARLA));
+		jdbc.update("UPDATE usuario SET email_confirmado_em = now() WHERE id = ?", confirmada.id());
+		jdbc.update("UPDATE usuario SET criado_em = now() - INTERVAL '8 days' WHERE id IN (?, ?)", antiga.id(),
+				confirmada.id());
+
+		cleanup.deleteExpiredUnconfirmedAccounts();
+
+		assertThat(users.existsById(antiga.id())).isFalse();
+		assertThat(users.existsById(recente.id())).isTrue();
+		assertThat(users.existsById(confirmada.id())).isTrue();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM token_confirmacao_email WHERE usuario_id = ?",
+				Integer.class, antiga.id())).isZero();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auditoria WHERE usuario_id = ? AND operacao = ?",
+				Integer.class, antiga.id(), "EXCLUSAO_CONTA_NAO_CONFIRMADA")).isOne();
+	}
+
+	@Test
+	void limpezaApagaAdvogadoNaoConfirmadoComAsInscricoes() {
+		UserResponse bruno = registration.register(
+				TestData.advogado("bruno@exemplo.com", CPF_BRUNO, oab("12345", Uf.BA, OabRegistrationType.PRINCIPAL)));
+		jdbc.update("UPDATE usuario SET criado_em = now() - INTERVAL '8 days' WHERE id = ?", bruno.id());
+
+		cleanup.deleteExpiredUnconfirmedAccounts();
+
+		assertThat(users.existsById(bruno.id())).isFalse();
+		assertThat(oabRegistrations.count()).isZero();
+	}
+
 	private EmailRequested pedirRecuperacao(String email) {
 		passwordReset.requestReset(email);
 		await().atMost(ESPERA).until(() -> emails.received().size() == 1);
@@ -446,6 +587,12 @@ class IdentityModuleTests {
 		return link.substring(link.indexOf("token=") + "token=".length());
 	}
 
+	private static String tokenDaConfirmacao(EmailRequested email) {
+		String link = email.parameters().get("link");
+		assertThat(link).startsWith("http://localhost:3000/confirmar-email?token=");
+		return link.substring(link.indexOf("token=") + "token=".length());
+	}
+
 	private static String sha256(String value) {
 		try {
 			return HexFormat.of()
@@ -456,16 +603,28 @@ class IdentityModuleTests {
 		}
 	}
 
-	/** Recebe os eventos após o commit, de qualquer thread: o pedido de recuperação roda em segundo plano. */
+	/**
+	 * Recebe os eventos após o commit, de qualquer thread: o pedido de recuperação roda em segundo plano. Os e-mails de
+	 * confirmação do cadastro ficam separados, para não se misturarem aos de recuperação.
+	 */
 	static class EmailRecorder {
 
 		private final List<EmailRequested> received = new CopyOnWriteArrayList<>();
+		private final List<EmailRequested> confirmations = new CopyOnWriteArrayList<>();
 		private final List<String> threads = new CopyOnWriteArrayList<>();
 
 		@TransactionalEventListener
 		void on(EmailRequested event) {
+			if (event.type() == EmailType.CONFIRMACAO_EMAIL) {
+				confirmations.add(event);
+				return;
+			}
 			threads.add(Thread.currentThread().getName());
 			received.add(event);
+		}
+
+		List<EmailRequested> confirmations() {
+			return List.copyOf(confirmations);
 		}
 
 		List<EmailRequested> received() {
@@ -478,6 +637,7 @@ class IdentityModuleTests {
 
 		void clear() {
 			received.clear();
+			confirmations.clear();
 			threads.clear();
 		}
 

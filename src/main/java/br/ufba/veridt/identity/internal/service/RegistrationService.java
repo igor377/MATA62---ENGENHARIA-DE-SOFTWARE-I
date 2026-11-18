@@ -24,7 +24,10 @@ import br.ufba.veridt.identity.internal.repository.UserRepository;
 import br.ufba.veridt.shared.audit.AuditLog;
 import jakarta.validation.Valid;
 
-/** Cadastro de usuários (REQ 01). A senha é gravada só como hash Argon2id. */
+/**
+ * Cadastro de usuários (REQ 01). A senha é gravada só como hash Argon2id. A conta nasce sem o e-mail confirmado: o
+ * login só é liberado depois do link enviado por e-mail (ID-08).
+ */
 @Service
 @Validated
 public class RegistrationService {
@@ -34,15 +37,18 @@ public class RegistrationService {
 	private final UserMapper mapper;
 	private final PasswordEncoder passwordEncoder;
 	private final RegistrationConstraintTranslator constraintTranslator;
+	private final EmailConfirmationService emailConfirmation;
 	private final AuditLog auditLog;
 
 	public RegistrationService(UserRepository users, OabRegistrationRepository oabRegistrations, UserMapper mapper,
-			PasswordEncoder passwordEncoder, RegistrationConstraintTranslator constraintTranslator, AuditLog auditLog) {
+			PasswordEncoder passwordEncoder, RegistrationConstraintTranslator constraintTranslator,
+			EmailConfirmationService emailConfirmation, AuditLog auditLog) {
 		this.users = users;
 		this.oabRegistrations = oabRegistrations;
 		this.mapper = mapper;
 		this.passwordEncoder = passwordEncoder;
 		this.constraintTranslator = constraintTranslator;
+		this.emailConfirmation = emailConfirmation;
 		this.auditLog = auditLog;
 	}
 
@@ -56,6 +62,7 @@ public class RegistrationService {
 			users.saveAndFlush(user);
 			List<OabRegistration> saved = oabRegistrations
 				.saveAllAndFlush(mapper.toOabRegistrations(requestedOab, user.getId()));
+			emailConfirmation.issue(user);
 			auditLog.recordSuccess(IdentityAuditOperation.CADASTRO, user.getId());
 			return mapper.toResponse(user, saved);
 		}

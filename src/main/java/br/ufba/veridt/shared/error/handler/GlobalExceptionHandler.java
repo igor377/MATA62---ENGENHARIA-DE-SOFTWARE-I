@@ -19,6 +19,8 @@ import br.ufba.veridt.shared.error.dto.ErrorResponse;
 import br.ufba.veridt.shared.error.dto.FieldErrorResponse;
 import br.ufba.veridt.shared.error.exception.BusinessException;
 import br.ufba.veridt.shared.error.exception.ConflictException;
+import br.ufba.veridt.shared.error.exception.ForbiddenException;
+import br.ufba.veridt.shared.error.exception.PaymentRequiredException;
 import br.ufba.veridt.shared.error.exception.ResourceNotFoundException;
 import br.ufba.veridt.shared.error.exception.UnauthorizedException;
 import jakarta.validation.ConstraintViolationException;
@@ -40,6 +42,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(ConflictException.class)
 	ResponseEntity<ErrorResponse> handleConflict(ConflictException ex) {
 		return businessError(HttpStatus.CONFLICT, ex);
+	}
+
+	@ExceptionHandler(PaymentRequiredException.class)
+	ResponseEntity<ErrorResponse> handlePaymentRequired(PaymentRequiredException ex) {
+		return businessError(HttpStatus.PAYMENT_REQUIRED, ex);
+	}
+
+	@ExceptionHandler(ForbiddenException.class)
+	ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException ex) {
+		return businessError(HttpStatus.FORBIDDEN, ex);
 	}
 
 	@ExceptionHandler(UnauthorizedException.class)

@@ -1,12 +1,6 @@
 package br.ufba.veridt.identity.internal.service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Map;
 
 import org.springframework.context.ApplicationEventPublisher;
@@ -35,9 +29,6 @@ import jakarta.validation.constraints.NotBlank;
 @Service
 @Validated
 public class PasswordResetService {
-
-	private static final SecureRandom RANDOM = new SecureRandom();
-	private static final int TOKEN_BYTES = 32;
 
 	private final UserRepository users;
 	private final PasswordResetTokenRepository tokens;
@@ -70,12 +61,14 @@ public class PasswordResetService {
 	@Transactional
 	public void resetPassword(@Valid ResetPasswordRequest request) {
 		Instant now = Instant.now();
-		PasswordResetToken token = tokens.findByTokenHash(hash(request.token()))
+		PasswordResetToken token = tokens.findByTokenHash(SecureTokens.hash(request.token()))
 			.filter(candidate -> candidate.isUsable(now))
 			.orElseThrow(this::invalidToken);
 		User user = users.findById(token.getUserId()).orElseThrow(this::invalidToken);
 
 		user.changePassword(passwordEncoder.encode(request.newPassword()));
+		// O link chegou pelo e-mail: quem redefiniu a senha também provou ser dono do endereço.
+		user.confirmEmail(now);
 		token.markUsed(now);
 		events.publishEvent(new PasswordChanged(user.getId()));
 		auditLog.recordSuccess(IdentityAuditOperation.REDEFINICAO_SENHA, user.getId());
@@ -90,27 +83,12 @@ public class PasswordResetService {
 	private void issueToken(User user) {
 		Instant now = Instant.now();
 		tokens.invalidateActiveTokens(user.getId(), now);
-		String token = newToken();
-		tokens.save(new PasswordResetToken(user.getId(), hash(token), now, now.plus(properties.resetTokenValidity())));
+		String token = SecureTokens.newToken();
+		tokens.save(new PasswordResetToken(user.getId(), SecureTokens.hash(token), now,
+				now.plus(properties.resetTokenValidity())));
 		events.publishEvent(new EmailRequested(user.getEmail(), EmailType.RECUPERACAO_SENHA,
 				Map.of("nome", user.getFullName(), "link", properties.resetUrl() + "?token=" + token,
 						"validadeMinutos", String.valueOf(properties.resetTokenValidity().toMinutes()))));
-	}
-
-	private static String newToken() {
-		byte[] bytes = new byte[TOKEN_BYTES];
-		RANDOM.nextBytes(bytes);
-		return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-	}
-
-	private static String hash(String token) {
-		try {
-			byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
-			return HexFormat.of().formatHex(digest);
-		}
-		catch (NoSuchAlgorithmException ex) {
-			throw new IllegalStateException("SHA-256 indisponível", ex);
-		}
 	}
 
 }
