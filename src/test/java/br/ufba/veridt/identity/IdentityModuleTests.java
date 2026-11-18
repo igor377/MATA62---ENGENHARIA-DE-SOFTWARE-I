@@ -34,7 +34,6 @@ import br.ufba.veridt.TestcontainersConfiguration;
 import br.ufba.veridt.identity.internal.domain.EmailConfirmationToken;
 import br.ufba.veridt.identity.internal.domain.OabRegistrationType;
 import br.ufba.veridt.identity.internal.domain.PasswordResetToken;
-import br.ufba.veridt.identity.internal.domain.Uf;
 import br.ufba.veridt.identity.internal.domain.User;
 import br.ufba.veridt.identity.internal.dto.OabRegistrationResponse;
 import br.ufba.veridt.identity.internal.dto.ResetPasswordRequest;
@@ -56,6 +55,7 @@ import br.ufba.veridt.notification.EmailRequested;
 import br.ufba.veridt.notification.EmailType;
 import br.ufba.veridt.shared.audit.AuditLog;
 import br.ufba.veridt.shared.audit.AuditRepository;
+import br.ufba.veridt.shared.validation.Uf;
 import jakarta.validation.ConstraintViolationException;
 
 @ApplicationModuleTest

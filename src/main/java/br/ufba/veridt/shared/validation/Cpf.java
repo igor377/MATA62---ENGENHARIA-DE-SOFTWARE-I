@@ -1,4 +1,4 @@
-package br.ufba.veridt.identity.internal.validation;
+package br.ufba.veridt.shared.validation;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;

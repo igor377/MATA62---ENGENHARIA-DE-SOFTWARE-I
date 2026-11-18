@@ -29,10 +29,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import br.ufba.veridt.TestcontainersConfiguration;
 import br.ufba.veridt.identity.internal.domain.OabRegistrationType;
-import br.ufba.veridt.identity.internal.domain.Uf;
 import br.ufba.veridt.notification.EmailRequested;
 import br.ufba.veridt.notification.EmailType;
 import br.ufba.veridt.notification.internal.sender.EmailSender;
+import br.ufba.veridt.shared.validation.Uf;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Rotas de cadastro e recuperação de senha pela cadeia real de filtros. */
