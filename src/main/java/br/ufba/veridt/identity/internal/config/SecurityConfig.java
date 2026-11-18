@@ -82,7 +82,9 @@ public class SecurityConfig {
 			.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
 			.requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
 			.requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/password-reset",
-					"/api/auth/password-reset/confirm").permitAll()
+					"/api/auth/password-reset/confirm", "/api/auth/email-confirmation/confirm",
+					"/api/auth/email-confirmation/resend")
+			.permitAll()
 			.anyRequest().authenticated())
 			.csrf(csrf -> csrf.spa())
 			.securityContext(context -> context.securityContextRepository(securityContextRepository))

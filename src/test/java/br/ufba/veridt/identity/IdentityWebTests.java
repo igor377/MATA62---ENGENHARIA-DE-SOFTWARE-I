@@ -31,6 +31,7 @@ import br.ufba.veridt.TestcontainersConfiguration;
 import br.ufba.veridt.identity.internal.domain.OabRegistrationType;
 import br.ufba.veridt.identity.internal.domain.Uf;
 import br.ufba.veridt.notification.EmailRequested;
+import br.ufba.veridt.notification.EmailType;
 import br.ufba.veridt.notification.internal.sender.EmailSender;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -47,6 +48,8 @@ class IdentityWebTests {
 	private static final String CADASTRO = "/api/auth/register";
 	private static final String RECUPERACAO = "/api/auth/password-reset";
 	private static final String CONFIRMACAO = "/api/auth/password-reset/confirm";
+	private static final String CONFIRMAR_EMAIL = "/api/auth/email-confirmation/confirm";
+	private static final String REENVIAR = "/api/auth/email-confirmation/resend";
 
 	@MockitoBean
 	private EmailSender emailSender;
@@ -93,11 +96,65 @@ class IdentityWebTests {
 			.andExpect(jsonPath("$.oabRegistrations[0].type").value("PRINCIPAL"));
 	}
 
+	// ID-08: confirmação de e-mail
+
 	@Test
-	void usuarioCadastradoConsegueFazerLogin() throws Exception {
+	void loginSoDepoisDeConfirmarOEmail() throws Exception {
 		postar(CADASTRO, TestData.comum("ana@exemplo.com", CPF_ANA)).andExpect(status().isCreated());
 
+		login("ana@exemplo.com", TestData.SENHA)
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.code").value("EMAIL_NAO_CONFIRMADO"));
+		postar(CONFIRMAR_EMAIL, Map.of("token", token(emailDo(EmailType.CONFIRMACAO_EMAIL))))
+			.andExpect(status().isNoContent());
+
 		login("ana@exemplo.com", TestData.SENHA).andExpect(status().isNoContent());
+	}
+
+	@Test
+	void semConfirmacaoSenhaErradaContinuaComO401GenericoENenhumaSessaoECriada() throws Exception {
+		postar(CADASTRO, TestData.comum("ana@exemplo.com", CPF_ANA)).andExpect(status().isCreated());
+
+		login("ana@exemplo.com", "Errada#123")
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.code").value("CREDENCIAIS_INVALIDAS"));
+		login("ana@exemplo.com", TestData.SENHA).andExpect(status().isForbidden());
+
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM spring_session", Integer.class)).isZero();
+	}
+
+	@Test
+	void tokenDeConfirmacaoUsadoOuInventadoRetorna422() throws Exception {
+		postar(CADASTRO, TestData.comum("ana@exemplo.com", CPF_ANA)).andExpect(status().isCreated());
+		String token = token(emailDo(EmailType.CONFIRMACAO_EMAIL));
+		postar(CONFIRMAR_EMAIL, Map.of("token", token)).andExpect(status().isNoContent());
+
+		postar(CONFIRMAR_EMAIL, Map.of("token", token))
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(jsonPath("$.code").value("TOKEN_INVALIDO"));
+		postar(CONFIRMAR_EMAIL, Map.of("token", "inventado"))
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(jsonPath("$.code").value("TOKEN_INVALIDO"));
+	}
+
+	@Test
+	void reenvioRetorna202ComEmailCadastradoOuNao() throws Exception {
+		postar(CADASTRO, TestData.comum("ana@exemplo.com", CPF_ANA)).andExpect(status().isCreated());
+		jdbc.update("UPDATE token_confirmacao_email SET criado_em = criado_em - INTERVAL '2 minutes'");
+
+		postar(REENVIAR, Map.of("email", "ana@exemplo.com")).andExpect(status().isAccepted());
+		postar(REENVIAR, Map.of("email", "ninguem@exemplo.com")).andExpect(status().isAccepted());
+
+		await().atMost(ESPERA).until(() -> emailsDo(EmailType.CONFIRMACAO_EMAIL).size() == 2);
+		assertThat(emailsDo(EmailType.CONFIRMACAO_EMAIL)).extracting(EmailRequested::recipient)
+			.containsOnly("ana@exemplo.com");
+	}
+
+	@Test
+	void rotasDeConfirmacaoExigemCsrf() throws Exception {
+		mvc.perform(post(CONFIRMAR_EMAIL).contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"x\"}"))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.code").value("ACESSO_NEGADO"));
 	}
 
 	@Test
@@ -139,8 +196,8 @@ class IdentityWebTests {
 		postar(RECUPERACAO, Map.of("email", "ana@exemplo.com")).andExpect(status().isAccepted());
 		postar(RECUPERACAO, Map.of("email", "ninguem@exemplo.com")).andExpect(status().isAccepted());
 
-		await().atMost(ESPERA).until(() -> emails.received().size() == 1);
-		assertThat(emails.received().getFirst().recipient()).isEqualTo("ana@exemplo.com");
+		await().atMost(ESPERA).until(() -> emailsDo(EmailType.RECUPERACAO_SENHA).size() == 1);
+		assertThat(emailDo(EmailType.RECUPERACAO_SENHA).recipient()).isEqualTo("ana@exemplo.com");
 	}
 
 	@Test
@@ -154,12 +211,12 @@ class IdentityWebTests {
 	void fluxoCompletoDeRecuperacaoTrocaASenha() throws Exception {
 		postar(CADASTRO, TestData.comum("ana@exemplo.com", CPF_ANA)).andExpect(status().isCreated());
 		postar(RECUPERACAO, Map.of("email", "ana@exemplo.com")).andExpect(status().isAccepted());
-		await().atMost(ESPERA).until(() -> emails.received().size() == 1);
-		String link = emails.received().getFirst().parameters().get("link");
-		String token = link.substring(link.indexOf("token=") + "token=".length());
+		await().atMost(ESPERA).until(() -> emailsDo(EmailType.RECUPERACAO_SENHA).size() == 1);
+		String token = token(emailDo(EmailType.RECUPERACAO_SENHA));
 
 		postar(CONFIRMACAO, Map.of("token", token, "newPassword", "Nova#Senha2")).andExpect(status().isNoContent());
 
+		// Sem ter confirmado o e-mail: o link de redefinição também prova que o endereço é dela.
 		login("ana@exemplo.com", "Nova#Senha2").andExpect(status().isNoContent());
 		login("ana@exemplo.com", TestData.SENHA).andExpect(status().isUnauthorized());
 		postar(CONFIRMACAO, Map.of("token", token, "newPassword", "Outra#Senha3"))
@@ -178,6 +235,19 @@ class IdentityWebTests {
 		return mvc.perform(post(rota).with(TestData.csrfDaSpa())
 			.contentType(MediaType.APPLICATION_JSON)
 			.content(json.writeValueAsString(corpo)));
+	}
+
+	private List<EmailRequested> emailsDo(EmailType tipo) {
+		return emails.received().stream().filter(email -> email.type() == tipo).toList();
+	}
+
+	private EmailRequested emailDo(EmailType tipo) {
+		return emailsDo(tipo).getFirst();
+	}
+
+	private static String token(EmailRequested email) {
+		String link = email.parameters().get("link");
+		return link.substring(link.indexOf("token=") + "token=".length());
 	}
 
 	private ResultActions login(String email, String senha) throws Exception {

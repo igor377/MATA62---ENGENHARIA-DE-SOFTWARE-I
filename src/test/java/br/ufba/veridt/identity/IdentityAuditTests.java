@@ -30,6 +30,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import br.ufba.veridt.TestcontainersConfiguration;
 import br.ufba.veridt.notification.EmailRequested;
+import br.ufba.veridt.notification.EmailType;
 import br.ufba.veridt.notification.internal.sender.EmailSender;
 import jakarta.servlet.http.Cookie;
 import tools.jackson.databind.json.JsonMapper;
@@ -77,6 +78,7 @@ class IdentityAuditTests {
 			.andExpect(status().isCreated())
 			.andReturn();
 		ana = UUID.fromString(json.readTree(cadastro.getResponse().getContentAsString()).path("id").asString());
+		TestData.confirmarEmail(jdbc, EMAIL);
 	}
 
 	@Test
@@ -156,9 +158,12 @@ class IdentityAuditTests {
 
 		private final List<EmailRequested> received = new CopyOnWriteArrayList<>();
 
+		/** Só a recuperação de senha: o e-mail de confirmação do cadastro não interessa aqui. */
 		@TransactionalEventListener
 		void on(EmailRequested event) {
-			received.add(event);
+			if (event.type() == EmailType.RECUPERACAO_SENHA) {
+				received.add(event);
+			}
 		}
 
 		List<EmailRequested> received() {

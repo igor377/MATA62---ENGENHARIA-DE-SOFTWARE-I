@@ -13,7 +13,8 @@ import br.ufba.veridt.identity.internal.config.IdentityProperties;
 class PasswordPolicyTests {
 
 	private final PasswordPolicy policy = new PasswordPolicy(
-			new IdentityProperties(Duration.ofMinutes(15), "http://localhost/redefinir", 8));
+			new IdentityProperties(Duration.ofMinutes(15), "http://localhost/redefinir", 8,
+					"http://localhost/confirmar", Duration.ofHours(24), Duration.ofSeconds(60), Duration.ofDays(7)));
 
 	@ParameterizedTest
 	@ValueSource(strings = { "Senha#123", "a1!bcdef", "ÁrvoreÇ9@" })
