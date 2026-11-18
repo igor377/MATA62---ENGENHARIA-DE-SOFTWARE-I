@@ -1,99 +1,154 @@
-# Sprint 1: Fundação, notificações, identidade e armazenamento
+# Sprint 1: Veridt
 
 | | |
 |---|---|
-| **Período** | 06/11/2026 a 11/11/2026 |
-| **Branch de integração** | `desenv` (merge `989c2ec`) |
-| **Pull requests** | #1, #2, #4, #6, #7, #9 e #11 |
-| **Requisitos atendidos** | REQ 01, 02, 03 e 04 |
-| **Tarefas concluídas** | 14 de 41 do backlog |
+| **Período** | 06/11/2026 a 18/11/2026 |
+| **Branch de integração** | `desenv` (merge `b353089`) |
+| **Pull requests** | #1, #2, #4, #6, #7, #9, #11, #13, #14, #17 e #18 |
+| **Requisitos implementados** | 6 de 16 (37,5%): REQ 01, 02, 03, 04, 05 e 07 |
+| **Requisito parcial** | REQ 06 (pagamento simulado, sem Mercado Pago) |
+| **Tarefas do backlog concluídas** | 20 de 42 |
 
 ## Objetivo
 
-Preparar a base técnica do back-end e entregar o primeiro módulo de negócio completo: cadastro, login, logout e recuperação de senha, com e-mail assíncrono e auditoria. A sprint também entregou o armazenamento de arquivos, base para os módulos de captura e de registros.
+Implementar ao menos 30% dos requisitos do Veridt seguindo a arquitetura definida nas ADRs. A sprint entregou a base técnica do back-end e os fluxos completos de conta de usuário e de compra de créditos, além do armazenamento de arquivos que servirá à captura de conteúdo.
 
-## Entregas
+## Requisitos implementados
+
+O documento de requisitos tem 16 requisitos, porque o número REQ 11 aparece duas vezes: concluir a captura de tela (**REQ 11a**) e confirmar a captura por e-mail (**REQ 11b**).
+
+| Requisito | Situação | Como foi atendido |
+|---|---|---|
+| REQ 01: Cadastrar usuário | Implementado | Cadastro de advogados e usuários comuns com os campos do Apêndice A (nome, e-mail, senha, CPF e OAB para advogados), conforme a decisão D1. Valida CPF, política de senha e unicidade de e-mail e CPF. A conta é ativada por confirmação de e-mail. |
+| REQ 02: Recuperar senha | Implementado | Link de redefinição enviado por e-mail, com token de uso único válido por 15 minutos. A resposta não revela se o e-mail existe. |
+| REQ 03: Logar no sistema | Implementado | Login por e-mail e senha, com sessão no servidor. Credenciais inválidas não revelam se o e-mail existe. |
+| REQ 04: Sair do sistema | Implementado | Logout encerra a sessão no servidor. |
+| REQ 05: Comprar créditos | Implementado | Seleção de pacote (básico, médio e premium, conforme D2), dados de faturamento do Apêndice A e criação do pedido. O valor é sempre calculado no servidor. |
+| REQ 06: Efetuar pagamento | **Parcial** | O pagamento passa por uma interface `PaymentGateway` com implementação simulada, e a confirmação já concede os créditos uma única vez. Faltam a integração com o Mercado Pago, o Pix e o webhook. |
+| REQ 07: Confirmar pagamento por e-mail | Implementado | Quando o pagamento é confirmado, o usuário recebe o e-mail de compra confirmada no endereço de faturamento. |
+| REQ 08 a REQ 15 | Não iniciados | Captura, gravação e registros ficam para a próxima sprint. Os modelos de e-mail de REQ 10 e REQ 11b e o armazenamento de arquivos já estão prontos. |
+
+## ADRs implementadas
+
+### ADR-0001: Monólito modular
+A aplicação é um único artefato Spring Boot, organizado em módulos com o Spring Modulith. O teste `ModularityTests` verifica a cada execução que nenhum módulo acessa outro fora das dependências permitidas:
+
+| Módulo | Pode depender de |
+|---|---|
+| `identity` | `notification` |
+| `credits` | `notification` |
+| `records` | `storage` |
+| `capture` | `credits`, `records`, `notification`, `storage` |
+| `notification` e `storage` | Nenhum |
+
+Os módulos se comunicam por APIs públicas e eventos, o que mantém aberta a migração para serviços distribuídos prevista na ADR.
+
+### ADR-0002: Top 4 características arquiteturais
+
+| Característica | Implementação |
+|---|---|
+| Segurança | Acesso negado por padrão, senhas em Argon2id, sessões no servidor, proteção CSRF, confirmação de e-mail e tokens guardados apenas como hash SHA-256. Cada usuário acessa somente os próprios pedidos e saldo. Dados pessoais nunca aparecem em logs. |
+| Auditabilidade | Tabela `auditoria` somente de inserção: triggers no banco recusam `UPDATE`, `DELETE` e `TRUNCATE`. Cada arquivo armazenado tem SHA-256, calculado durante a gravação e salvo também no servidor de arquivos. |
+| Confiabilidade | E-mail assíncrono com reenvio após falha. A confirmação de pagamento é idempotente e concede créditos uma única vez, em uma transação. O saldo nunca fica negativo, mesmo com débitos simultâneos. Arquivos não podem ser sobrescritos. |
+| Rastreabilidade | Cadastro, login, logout, redefinição de senha, pedidos, pagamentos e concessão de créditos são registrados com usuário, data, operação e resultado. As movimentações de crédito também são somente de inserção e ligadas ao pedido de origem. |
+
+### ADR-0003: Particionamento por domínio
+Os pacotes seguem os domínios do sistema, e não camadas técnicas: `identity`, `credits`, `capture`, `records`, `notification` e `storage`. As camadas (web, serviço, repositório) ficam dentro de cada módulo, no subpacote `internal`.
+
+## Desvios da arquitetura
+
+| # | Documentação | Implementação | Motivo |
+|---|---|---|---|
+| 1 | A auditoria faz parte do `RecordsService` ("Metadados e auditoria"). | A auditoria fica em `shared.audit`, fora dos módulos, e é usada por todos. | Pelas dependências do diagrama de pacotes, `identity` e `credits` não podem acessar `records`, mas também precisam registrar auditoria. |
+| 2 | Não existe código compartilhado entre módulos. | O pacote `shared` reúne auditoria, tratamento de erros e validações comuns (CPF e UF). | Evita duplicar regras transversais em cada módulo sem criar dependências proibidas. |
+| 3 | `NotificationService` e `FileStorageService` ficam juntos no pacote "Externo". | Viraram dois módulos separados, `notification` e `storage`. | São responsabilidades independentes, sem dependência entre si. |
+| 4 | O cadastro não exige confirmação de e-mail. | Contas só fazem login após confirmar o e-mail, e contas não confirmadas em 7 dias são removidas. | Reforça a característica Segurança e garante que os e-mails de pagamento e de conclusão cheguem ao dono da conta. |
+
+## Decisões técnicas da sprint
+
+Pontos que a documentação de arquitetura deixava em aberto:
+
+| Tema | Decisão |
+|---|---|
+| Frontend | SPA separada, consumindo a API REST. O Docker Compose já sobe o frontend. |
+| Armazenamento de arquivos | API S3 genérica, com SeaweedFS no Docker Compose. Trocar de provedor exige só configuração. |
+| Pacotes de créditos | Valores provisórios: Básico (10 créditos a R$ 5,00), Médio (50 a R$ 4,50) e Premium (100 a R$ 4,00). Mudanças entram por nova migration, e pedidos antigos guardam uma cópia do pacote. |
+| Pagamento | Até a integração com o Mercado Pago, um gateway simulado. A rota de simulação só existe quando habilitada por configuração e vem desligada por padrão. |
+
+## Princípios SOLID
+
+| Princípio | Onde | Por quê |
+|---|---|---|
+| Responsabilidade única (S) | Controllers só recebem e delegam, serviços concentram as regras e repositórios só persistem. Exemplos: `RegistrationConstraintTranslator` só traduz erros do banco, e `EmailTemplateRenderer` só monta o e-mail. | Cada classe muda por um único motivo, o que facilita testes e manutenção. |
+| Aberto/fechado (O) | `AuditOperation`: cada módulo cria seu próprio enum (`IdentityAuditOperation`, `CreditsAuditOperation`). `EmailType` define assunto e parâmetros de cada e-mail. | Novas operações de auditoria e novos tipos de e-mail entram sem alterar o código existente. |
+| Substituição de Liskov (L) | `FileStorageContractTests` roda os mesmos testes em `S3FileStorage` e na versão em memória. | Garante que qualquer implementação de `FileStorage` funcione no lugar de outra. |
+| Segregação de interfaces (I) | `FileStorage` tem três métodos (`store`, `open`, `find`), `CreditLedger` tem três (`balance`, `credit`, `debit`) e `PaymentGateway` tem um (`start`). | Os módulos dependem só do que usam. `capture`, por exemplo, verá apenas o saldo e o débito. |
+| Inversão de dependência (D) | Serviços dependem de interfaces: `EmailSender` (SMTP), `FileStorage` (S3), `PaymentGateway` (simulado, futuramente Mercado Pago) e `CreditLedger` (JDBC). | Serviços externos podem ser trocados ou simulados nos testes sem alterar as regras de negócio. |
+
+## Entregas por módulo
 
 ### Fundação (PR #1)
-
-| Tarefa | Entrega |
-|---|---|
-| FND-01 | Seis módulos Spring Modulith (`identity`, `credits`, `capture`, `records`, `notification`, `storage`), com as dependências permitidas declaradas e verificadas pelo `ModularityTests`. |
-| FND-02 | Ambiente de desenvolvimento com Postgres e Mailpit no Docker Compose, `.env.example` e `.dockerignore`. |
-| FND-03 | Tratamento global de erros em `shared.error`, com resposta padronizada (`ErrorResponse`) e exceções de negócio (422, 404 e 409). |
-
-Antes do PR, foram corrigidos erros que impediam a execução: sintaxe das variáveis no `compose.yaml`, porta do Postgres e carregamento do `.env`.
+- Estrutura dos seis módulos e verificação automática das dependências.
+- Docker Compose com Postgres e Mailpit, `.env.example` e `.dockerignore`.
+- Tratamento global de erros, com resposta padronizada e exceções de negócio (402, 404, 409 e 422).
 
 ### Notification (PR #2)
+- E-mail assíncrono pelo evento `EmailRequested`. O envio só acontece após o commit de quem pediu, e uma falha não desfaz a operação principal.
+- Modelos HTML de confirmação de e-mail, recuperação de senha, compra confirmada, gravação concluída e captura concluída.
+- E-mails com tokens são apagados do banco após o envio.
 
-| Tarefa | Entrega |
-|---|---|
-| NOT-01 | Envio assíncrono por meio do evento `EmailRequested`. O e-mail só sai após o commit de quem o pediu, uma falha no envio não desfaz a operação principal e eventos pendentes são reenviados ao reiniciar. |
-| NOT-02 | Modelos HTML para recuperação de senha, compra confirmada, gravação concluída e captura concluída, na paleta do Figma. |
+### Identity (PRs #4, #6, #7, #13 e #17)
+- Cadastro, login, logout, recuperação de senha e confirmação de e-mail.
+- Advogados podem ter várias inscrições na OAB, com pelo menos uma obrigatória.
+- Rota `GET /api/me` para o frontend saber quem está logado.
+- Auditoria de todas as operações de conta.
 
-O envio roda em um executor próprio, para não ocupar as threads do restante da aplicação, e os logs não registram destinatário nem parâmetros.
+### Storage (PRs #9 e #11)
+- API `FileStorage` com SHA-256 calculado na gravação e proibição de sobrescrita.
+- Implementação S3 sobre o SeaweedFS e versão em memória para testes.
 
-### Identity (PRs #4 e #6)
+### Credits (PR #18)
+- Pacotes de créditos, saldo e movimentações somente de inserção, com chave de idempotência.
+- Pedido com dados de faturamento, cópia do pacote e cabeçalho `Idempotency-Key`.
+- Confirmação de pagamento idempotente, com concessão de créditos e e-mail.
+- Auditoria de pedidos, pagamentos e créditos concedidos.
 
-| Tarefa | Entrega |
-|---|---|
-| ID-01 | Spring Security que nega tudo por padrão, senhas em Argon2id e sessões no banco (Spring Session JDBC). |
-| ID-02 | Usuários dos tipos `ADVOGADO` e `COMUM`, com e-mail e CPF únicos. Advogados podem ter várias inscrições na OAB, com pelo menos uma obrigatória. |
-| ID-03 | Cadastro com validação dos campos, dos dígitos do CPF e da política de senha. |
-| ID-04 | Login por e-mail. Credenciais inválidas não revelam se o e-mail existe, e a sessão é trocada no login e encerrada no logout. |
-| ID-05 | Recuperação de senha com token de uso único e validade de 15 minutos. Só o hash fica no banco, e o tempo de resposta não revela se o e-mail existe. Redefinir a senha encerra todas as sessões do usuário. |
-| ID-06 | Rotas REST para o frontend SPA, com proteção CSRF. |
+### Infraestrutura (PR #14)
+- Serviço do frontend no Docker Compose.
 
-**Rotas disponíveis**
+## API REST
 
 | Método | Rota | Acesso | Função |
 |---|---|---|---|
 | `GET` | `/api/auth/csrf` | Público | Gera o token CSRF |
-| `POST` | `/api/auth/register` | Público | Cadastro (201) |
-| `POST` | `/api/auth/login` | Público | Login (204) |
+| `POST` | `/api/auth/register` | Público | Cadastro |
+| `POST` | `/api/auth/email-confirmation/confirm` | Público | Confirma o e-mail |
+| `POST` | `/api/auth/email-confirmation/resend` | Público | Reenvia a confirmação |
+| `POST` | `/api/auth/login` | Público | Login |
 | `POST` | `/api/auth/logout` | Autenticado | Logout |
-| `POST` | `/api/auth/password-reset` | Público | Solicita a recuperação |
+| `POST` | `/api/auth/password-reset` | Público | Solicita a recuperação de senha |
 | `POST` | `/api/auth/password-reset/confirm` | Público | Redefine a senha |
-
-### Auditoria (PR #7)
-
-| Tarefa | Entrega |
-|---|---|
-| ID-07 | Log de auditoria em `shared.audit`, usado por todos os módulos. A tabela `auditoria` é somente de inserção: triggers no banco recusam `UPDATE`, `DELETE` e `TRUNCATE`. O módulo `identity` registra cadastro, login, logout e redefinição de senha, com sucesso ou falha. |
-
-Falhas são registradas em transação própria, para não se perderem quando a operação principal é desfeita. Nenhum dado pessoal vai para o detalhe do registro.
-
-### Storage (PRs #9 e #11)
-
-| Tarefa | Entrega |
-|---|---|
-| STO-01 | API pública `FileStorage` para gravar, abrir e consultar arquivos. Cada gravação retorna chave, tamanho e SHA-256, calculado durante a escrita. Um arquivo nunca é sobrescrito, e as chaves são validadas para impedir caminhos inválidos. Inclui testes de contrato que toda implementação deve passar e uma versão em memória para os testes de outros módulos. |
-| STO-02 | Implementação real sobre a API S3 (AWS SDK v2), usando o SeaweedFS no Docker Compose, com volume próprio. O próprio servidor recusa sobrescrita, e o hash fica salvo nos metadados do arquivo. O bucket é criado na primeira gravação, então a aplicação sobe mesmo sem o S3 disponível. |
-
-O SeaweedFS foi escolhido porque a versão comunitária do MinIO foi descontinuada. Como a aplicação usa a API S3 genérica, trocar de provedor exige só configuração.
+| `GET` | `/api/me` | Autenticado | Dados do usuário logado |
+| `GET` | `/api/credits/packages` | Autenticado | Lista os pacotes |
+| `GET` | `/api/credits/balance` | Autenticado | Consulta o saldo |
+| `POST` | `/api/credits/purchases` | Autenticado | Cria um pedido de compra |
+| `GET` | `/api/credits/payments` | Autenticado | Lista os próprios pedidos |
+| `GET` | `/api/credits/payments/{id}` | Autenticado | Consulta um pedido |
+| `POST` | `/api/credits/payments/{id}/simulation` | Autenticado, só com simulação habilitada | Simula o resultado do pagamento |
 
 ## Banco de dados
 
 | Migration | Conteúdo |
 |---|---|
-| `V1__infraestrutura_spring` | Tabelas de eventos do Spring Modulith e de sessões do Spring Session |
-| `V2__identity` | `usuario` e `token_recuperacao_senha` |
-| `V3__inscricao_oab` | `inscricao_oab` e verificação de inscrição obrigatória para advogados |
-| `V4__auditoria` | `auditoria` e triggers que impedem alterações |
+| `V1__infraestrutura_spring` | Eventos do Spring Modulith e sessões do Spring Session |
+| `V2__identity` | Usuários e tokens de recuperação de senha |
+| `V3__inscricao_oab` | Inscrições na OAB e obrigatoriedade para advogados |
+| `V4__auditoria` | Auditoria somente de inserção |
+| `V5__confirmacao_email` | Tokens de confirmação de e-mail |
+| `V6__creditos` | Pacotes, saldo, movimentações somente de inserção e pedidos |
 
 ## Qualidade
 
-- **Testes:** 159 testes automatizados, todos passando em 11/11/2026 no código do `desenv`. Os testes de integração usam Postgres, Mailpit e SeaweedFS reais via Testcontainers.
-- **Cobertura por área:** fronteiras entre módulos, tratamento de erros, envio e modelos de e-mail, regras de cadastro (CPF, senha, restrições do banco), segurança e CSRF, rotas REST, auditoria e armazenamento de arquivos.
-- **Características da ADR-0002 atendidas:**
-  - Segurança: Argon2id, sessões no servidor, CSRF e acesso negado por padrão.
-  - Confiabilidade: e-mail assíncrono com reenvio e arquivos que não podem ser sobrescritos.
-  - Rastreabilidade e auditabilidade: log de auditoria que não pode ser alterado e SHA-256 de cada arquivo armazenado.
-
-## Decisões tomadas na sprint
-
-| Pendência | Decisão | Situação |
-|---|---|---|
-| P1: Frontend | SPA | Aplicada nas rotas REST e no CSRF |
-| P3: Armazenamento | API S3 com SeaweedFS | Aplicada no módulo `storage` |
-| P6: Auditoria fora de `records` | `shared.audit`, uma tabela usada por todos os módulos | Aplicada na auditoria do `identity` |
+- **Testes:** testes automatizados de unidade e de integração. Os de integração usam Postgres, Mailpit e SeaweedFS reais via Testcontainers.
+- **Cobertura:** fronteiras entre módulos, tratamento de erros, e-mail, cadastro, segurança e CSRF, rotas REST, auditoria, armazenamento e créditos, incluindo débitos concorrentes e confirmações repetidas.
+- **Execução:** o README traz as instruções para subir o sistema com Docker Compose (Postgres, Mailpit, SeaweedFS, back-end e frontend).
