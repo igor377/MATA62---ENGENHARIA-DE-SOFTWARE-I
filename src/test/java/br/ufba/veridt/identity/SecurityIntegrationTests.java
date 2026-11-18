@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.context.TestConstructor;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import br.ufba.veridt.TestcontainersConfiguration;
 import br.ufba.veridt.identity.internal.dto.UserResponse;
 import br.ufba.veridt.identity.internal.service.RegistrationService;
+import br.ufba.veridt.notification.internal.sender.EmailSender;
 import jakarta.servlet.http.Cookie;
 
 /** ID-01 e ID-04 pela cadeia real de filtros: Spring Session JDBC + Spring Security. */
@@ -37,6 +39,10 @@ import jakarta.servlet.http.Cookie;
 class SecurityIntegrationTests {
 
 	private static final String CPF = TestData.cpf("529982247");
+
+	/** O cadastro envia o e-mail de confirmação; aqui não há servidor SMTP. */
+	@MockitoBean
+	private EmailSender emailSender;
 
 	private final MockMvc mvc;
 	private final RegistrationService registration;
@@ -56,6 +62,7 @@ class SecurityIntegrationTests {
 		jdbc.update("DELETE FROM token_recuperacao_senha");
 		jdbc.update("DELETE FROM usuario");
 		ana = registration.register(TestData.comum("ana@exemplo.com", CPF));
+		TestData.confirmarEmail(jdbc, "ana@exemplo.com");
 	}
 
 	@Test

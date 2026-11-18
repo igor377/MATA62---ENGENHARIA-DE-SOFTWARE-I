@@ -17,7 +17,7 @@ Advogados e usuários comuns compram pacotes de créditos (básico, médio e pre
 
 Em desenvolvimento. Concluído na Sprint 1 (detalhes em [docs/sprints/sprint-1.md](docs/sprints/sprint-1.md)):
 
-- **Identidade (REQ 01-04):** cadastro de advogados e usuários comuns, login, logout, recuperação de senha e auditoria.
+- **Identidade (REQ 01-04):** cadastro de advogados e usuários comuns com confirmação de e-mail, login, logout, recuperação de senha e auditoria.
 - **Notificação:** envio assíncrono e confiável de e-mails.
 - **Armazenamento:** gravação de arquivos com SHA-256 e proteção contra sobrescrita.
 
@@ -102,6 +102,9 @@ Só as do PostgreSQL são obrigatórias. As demais têm um padrão de desenvolvi
 | `RESET_URL` | `http://localhost:3000/redefinir-senha` | Página do frontend que recebe o link de redefinição de senha. Com `pnpm dev`, use a porta `5173` |
 | `RESET_TOKEN_VALIDITY` | `15m` | Validade do link de redefinição |
 | `PASSWORD_MIN_LENGTH` | `8` | Tamanho mínimo da senha |
+| `CONFIRMATION_URL` | `http://localhost:3000/confirmar-email` | Página do frontend que recebe o link de confirmação de e-mail e envia o token ao backend |
+| `CONFIRMATION_TOKEN_VALIDITY` | `24h` | Validade do link de confirmação de e-mail |
+| `UNCONFIRMED_ACCOUNT_RETENTION` | `7d` | Tempo até uma conta sem e-mail confirmado ser apagada, liberando o e-mail e o CPF |
 | `MAIL_FROM` | `no-reply@veridt.local` | Remetente dos e-mails |
 | `MAIL_THREADS` | `2` | Envios de e-mail simultâneos |
 | `MAIL_SENSITIVE_CLEANUP_INTERVAL` | `PT5M` | Intervalo da limpeza dos e-mails com token já enviados |
@@ -117,13 +120,17 @@ Todas as rotas exigem login, exceto as marcadas como públicas. Erros seguem um 
 | Método e rota | Acesso | Descrição |
 |---|---|---|
 | `GET /api/auth/csrf` | Público | Grava o cookie `XSRF-TOKEN` |
-| `POST /api/auth/register` | Público | Cadastro de usuário comum ou advogado, com inscrições na OAB |
-| `POST /api/auth/login` | Público | Login com `email` e `password` em JSON; cria o cookie `SESSION` |
+| `POST /api/auth/register` | Público | Cadastro de usuário comum ou advogado, com inscrições na OAB; envia o e-mail de confirmação |
+| `POST /api/auth/email-confirmation/confirm` | Público | Confirma o e-mail com o `token` do link |
+| `POST /api/auth/email-confirmation/resend` | Público | Reenvia o link de confirmação; responde 202 com e-mail cadastrado ou não |
+| `POST /api/auth/login` | Público | Login com `email` e `password` em JSON; cria o cookie `SESSION`. Com o e-mail ainda não confirmado, responde 403 `EMAIL_NAO_CONFIRMADO` |
 | `POST /api/auth/logout` | Logado | Encerra a sessão |
 | `GET /api/me` | Logado | Dados do usuário logado |
 | `POST /api/auth/password-reset` | Público | Pede o link de redefinição; responde 202 com e-mail cadastrado ou não |
 | `POST /api/auth/password-reset/confirm` | Público | Define a nova senha com o `token` do link |
 | `GET /actuator/health` | Público | Saúde da aplicação |
+
+**Confirmação de e-mail:** o cadastro envia um link para `CONFIRMATION_URL?token=...`. A página do frontend envia esse token por `POST` para `/api/auth/email-confirmation/confirm`, e só então o login é liberado. O link vale 24 horas e só pode ser usado uma vez; o banco guarda apenas o SHA-256 do token. Contas não confirmadas em 7 dias são apagadas. Redefinir a senha também confirma o e-mail.
 
 **CSRF:** todo `POST` precisa do cabeçalho `X-XSRF-TOKEN` com o valor do cookie `XSRF-TOKEN`. Chame `GET /api/auth/csrf` antes do primeiro `POST` e de novo depois do login, porque o token muda. Bibliotecas como o Axios fazem isso automaticamente.
 

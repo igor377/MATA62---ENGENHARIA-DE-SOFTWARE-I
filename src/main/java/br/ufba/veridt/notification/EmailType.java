@@ -7,6 +7,7 @@ import java.util.Locale;
 public enum EmailType {
 
 	RECUPERACAO_SENHA("Recuperação de senha", List.of("nome", "link", "validadeMinutos"), true),
+	CONFIRMACAO_EMAIL("Confirme seu e-mail", List.of("nome", "link", "validadeHoras"), true),
 	COMPRA_CONFIRMADA("Compra de créditos confirmada", List.of("nome", "pacote", "creditos", "valor"), false),
 	GRAVACAO_CONCLUIDA("Gravação concluída", List.of("titulo", "url", "registroId", "concluidoEm"), false),
 	CAPTURA_CONCLUIDA("Captura de tela concluída", List.of("titulo", "url", "registroId", "concluidoEm"), false);

@@ -75,6 +75,9 @@ services:
       - RESET_URL=${RESET_URL:-http://localhost:3000/redefinir-senha}
       - RESET_TOKEN_VALIDITY=${RESET_TOKEN_VALIDITY:-15m}
       - PASSWORD_MIN_LENGTH=${PASSWORD_MIN_LENGTH:-8}
+      - CONFIRMATION_URL=${CONFIRMATION_URL:-http://localhost:3000/confirmar-email}
+      - CONFIRMATION_TOKEN_VALIDITY=${CONFIRMATION_TOKEN_VALIDITY:-24h}
+      - UNCONFIRMED_ACCOUNT_RETENTION=${UNCONFIRMED_ACCOUNT_RETENTION:-7d}
       - S3_ENDPOINT=http://seaweedfs:8333
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-veridt}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-veridt-dev-secret}
