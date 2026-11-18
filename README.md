@@ -21,7 +21,9 @@ Em desenvolvimento. Concluído na Sprint 1 (detalhes em [docs/sprints/sprint-1.m
 - **Notificação:** envio assíncrono e confiável de e-mails.
 - **Armazenamento:** gravação de arquivos com SHA-256 e proteção contra sobrescrita.
 
-Créditos, captura e registros ainda serão implementados.
+- **Créditos (REQ 05 e 07, parcial):** pacotes, saldo com extrato, pedidos de compra e confirmação de pagamento. Ainda sem provedor de pagamento: o Mercado Pago e o Pix entram no CRE-04 e no CRE-05.
+
+Captura e registros ainda serão implementados.
 
 ## Stack
 
@@ -45,7 +47,7 @@ O sistema é um monólito modular, particionado por domínio. As fronteiras entr
 | `identity` | Cadastro, login, logout e recuperação de senha | REQ 01-04 | Pronto |
 | `notification` | Envio assíncrono de e-mails | REQ 02, 07, 10 e 11 | Pronto |
 | `storage` | Armazenamento e integridade dos arquivos | Suporte a `capture` e `records` | Pronto |
-| `credits` | Pacotes, saldo e pagamentos | REQ 05-07 | A fazer |
+| `credits` | Pacotes, saldo e pagamentos | REQ 05-07 | Parcial: falta o provedor de pagamento |
 | `capture` | Captura de tela e gravação de navegação | REQ 08-11 | A fazer |
 | `records` | Listagem, detalhes, relatórios e exportação em ZIP | REQ 12-15 | A fazer |
 
@@ -105,6 +107,8 @@ Só as do PostgreSQL são obrigatórias. As demais têm um padrão de desenvolvi
 | `CONFIRMATION_URL` | `http://localhost:3000/confirmar-email` | Página do frontend que recebe o link de confirmação de e-mail e envia o token ao backend |
 | `CONFIRMATION_TOKEN_VALIDITY` | `24h` | Validade do link de confirmação de e-mail |
 | `UNCONFIRMED_ACCOUNT_RETENTION` | `7d` | Tempo até uma conta sem e-mail confirmado ser apagada, liberando o e-mail e o CPF |
+| `PAYMENT_SIMULATION_ENABLED` | `false` no código, `true` no `compose.yaml` | Liga a rota que aprova ou recusa o próprio pedido sem provedor. **Nunca use `true` em produção** |
+| `PAYMENT_FAKE_RETURN_URL` | `http://localhost:3000/creditos/pagamento` | Página do frontend para onde o checkout falso do Mercado Pago leva |
 | `MAIL_FROM` | `no-reply@veridt.local` | Remetente dos e-mails |
 | `MAIL_THREADS` | `2` | Envios de e-mail simultâneos |
 | `MAIL_SENSITIVE_CLEANUP_INTERVAL` | `PT5M` | Intervalo da limpeza dos e-mails com token já enviados |
@@ -128,9 +132,17 @@ Todas as rotas exigem login, exceto as marcadas como públicas. Erros seguem um 
 | `GET /api/me` | Logado | Dados do usuário logado |
 | `POST /api/auth/password-reset` | Público | Pede o link de redefinição; responde 202 com e-mail cadastrado ou não |
 | `POST /api/auth/password-reset/confirm` | Público | Define a nova senha com o `token` do link |
+| `GET /api/credits/packages` | Logado | Pacotes à venda, com o total calculado |
+| `GET /api/credits/balance` | Logado | Saldo de créditos do usuário |
+| `POST /api/credits/purchases` | Logado | Cria o pedido de compra. Exige o cabeçalho `Idempotency-Key`: repetir a chave devolve o mesmo pedido (200) |
+| `GET /api/credits/payments` | Logado | Pedidos do usuário, do mais recente para o mais antigo (`page`, `size` até 50) |
+| `GET /api/credits/payments/{id}` | Logado | Um pedido do usuário; o de outro usuário responde 404 |
+| `POST /api/credits/payments/{id}/simulation` | Logado, só em desenvolvimento | Aprova ou recusa o próprio pedido (`{"approved": true}`). Só existe com `PAYMENT_SIMULATION_ENABLED=true` |
 | `GET /actuator/health` | Público | Saúde da aplicação |
 
 **Confirmação de e-mail:** o cadastro envia um link para `CONFIRMATION_URL?token=...`. A página do frontend envia esse token por `POST` para `/api/auth/email-confirmation/confirm`, e só então o login é liberado. O link vale 24 horas e só pode ser usado uma vez; o banco guarda apenas o SHA-256 do token. Contas não confirmadas em 7 dias são apagadas. Redefinir a senha também confirma o e-mail.
+
+**Créditos:** o valor do pedido vem sempre do pacote, no servidor. O saldo nunca fica negativo, mesmo com débitos simultâneos, e cada movimentação tem uma chave de idempotência. A aprovação de um pagamento concede os créditos e envia o e-mail de compra uma única vez. Saldo insuficiente responde 402 `SALDO_INSUFICIENTE`.
 
 **CSRF:** todo `POST` precisa do cabeçalho `X-XSRF-TOKEN` com o valor do cookie `XSRF-TOKEN`. Chame `GET /api/auth/csrf` antes do primeiro `POST` e de novo depois do login, porque o token muda. Bibliotecas como o Axios fazem isso automaticamente.
 

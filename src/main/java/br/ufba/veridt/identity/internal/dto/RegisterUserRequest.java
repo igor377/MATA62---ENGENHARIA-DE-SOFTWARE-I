@@ -3,9 +3,9 @@ package br.ufba.veridt.identity.internal.dto;
 import java.util.List;
 
 import br.ufba.veridt.identity.internal.domain.UserType;
-import br.ufba.veridt.identity.internal.validation.Cpf;
 import br.ufba.veridt.identity.internal.validation.StrongPassword;
 import br.ufba.veridt.identity.internal.validation.ValidOab;
+import br.ufba.veridt.shared.validation.Cpf;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

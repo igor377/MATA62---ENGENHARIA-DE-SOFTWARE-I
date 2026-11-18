@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import br.ufba.veridt.shared.error.exception.BusinessException;
 import br.ufba.veridt.shared.error.exception.ConflictException;
+import br.ufba.veridt.shared.error.exception.ForbiddenException;
+import br.ufba.veridt.shared.error.exception.PaymentRequiredException;
 import br.ufba.veridt.shared.error.exception.ResourceNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Valid;
@@ -50,6 +52,20 @@ class GlobalExceptionHandlerTests {
 		mockMvc.perform(get("/nao-encontrado"))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.code").value("REGISTRO_NAO_ENCONTRADO"));
+	}
+
+	@Test
+	void semSaldoRetorna402() throws Exception {
+		mockMvc.perform(get("/pagamento"))
+			.andExpect(status().isPaymentRequired())
+			.andExpect(jsonPath("$.code").value("SALDO_INSUFICIENTE"));
+	}
+
+	@Test
+	void proibidoRetorna403() throws Exception {
+		mockMvc.perform(get("/proibido"))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.code").value("EMAIL_NAO_CONFIRMADO"));
 	}
 
 	@Test
@@ -120,6 +136,16 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/nao-encontrado")
 		void naoEncontrado() {
 			throw new ResourceNotFoundException("REGISTRO_NAO_ENCONTRADO", "Registro não encontrado.");
+		}
+
+		@GetMapping("/pagamento")
+		void pagamento() {
+			throw new PaymentRequiredException("SALDO_INSUFICIENTE", "Saldo de créditos insuficiente.");
+		}
+
+		@GetMapping("/proibido")
+		void proibido() {
+			throw new ForbiddenException("EMAIL_NAO_CONFIRMADO", "Confirme seu e-mail.");
 		}
 
 		@GetMapping("/conflito")

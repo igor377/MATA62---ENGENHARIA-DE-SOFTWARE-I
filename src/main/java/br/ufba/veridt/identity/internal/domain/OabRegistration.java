@@ -3,6 +3,7 @@ package br.ufba.veridt.identity.internal.domain;
 import java.time.Instant;
 import java.util.UUID;
 
+import br.ufba.veridt.shared.validation.Uf;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
