@@ -31,8 +31,16 @@ public class UserMapper {
 			.map(registration -> new OabRegistrationResponse(registration.getNumber(), registration.getState(),
 					registration.getType()))
 			.toList();
-		return new UserResponse(user.getId(), user.getFullName(), user.getEmail(), user.getType(), oabRegistrations,
-				user.getCreatedAt());
+		return new UserResponse(user.getId(), user.getFullName(), user.getEmail(), maskCpf(user.getCpf()),
+				user.getType(), oabRegistrations, user.getCreatedAt());
+	}
+
+	/** Mostra só os 6 dígitos centrais; sem CPF de 11 dígitos, devolve nulo em vez de arriscar expor o valor. */
+	static String maskCpf(String cpf) {
+		if (cpf == null || !cpf.matches("\\d{11}")) {
+			return null;
+		}
+		return "***." + cpf.substring(3, 6) + "." + cpf.substring(6, 9) + "-**";
 	}
 
 }

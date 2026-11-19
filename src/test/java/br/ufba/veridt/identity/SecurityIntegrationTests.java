@@ -182,6 +182,7 @@ class SecurityIntegrationTests {
 			.andExpect(jsonPath("$.email").value("ana@exemplo.com"))
 			.andExpect(jsonPath("$.type").value("COMUM"))
 			.andExpect(jsonPath("$.cpf").doesNotExist())
+			.andExpect(jsonPath("$.cpfMasked").value("***.982.247-**"))
 			.andExpect(jsonPath("$.passwordHash").doesNotExist());
 	}
 
