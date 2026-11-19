@@ -108,6 +108,8 @@ Só as do PostgreSQL são obrigatórias. As demais têm um padrão de desenvolvi
 | `CONFIRMATION_TOKEN_VALIDITY` | `24h` | Validade do link de confirmação de e-mail |
 | `UNCONFIRMED_ACCOUNT_RETENTION` | `7d` | Tempo até uma conta sem e-mail confirmado ser apagada, liberando o e-mail e o CPF |
 | `PAYMENT_SIMULATION_ENABLED` | `false` no código, `true` no `compose.yaml` | Liga a rota que aprova ou recusa o próprio pedido sem provedor. **Nunca use `true` em produção** |
+| `TRUSTED_PROXIES` | vazio no código, `172.28.0.10` (nginx do frontend) no `compose.yaml` | IPs ou CIDRs cujo `X-Forwarded-For` é aceito para gravar o IP real na auditoria. Vazio: usa sempre o endereço da conexão |
+| `AUDIT_VERIFICATION_INTERVAL` | `PT6H` | Intervalo da verificação da cadeia de hashes da auditoria; uma quebra vira `VERIFICACAO_AUDITORIA` com falha na própria auditoria |
 | `PAYMENT_FAKE_RETURN_URL` | `http://localhost:3000/creditos/pagamento` | Página do frontend para onde o checkout falso do Mercado Pago leva |
 | `MAIL_FROM` | `no-reply@veridt.local` | Remetente dos e-mails |
 | `MAIL_THREADS` | `2` | Envios de e-mail simultâneos |

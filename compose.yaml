@@ -84,6 +84,9 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-veridt}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-veridt-dev-secret}
       - S3_BUCKET=${S3_BUCKET:-veridt-arquivos}
+      # Só o nginx do frontend (IP fixo abaixo) pode informar o IP real do cliente no X-Forwarded-For.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-172.28.0.10}
+      - AUDIT_VERIFICATION_INTERVAL=${AUDIT_VERIFICATION_INTERVAL:-PT6H}
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,7 +113,9 @@ services:
       backend:
         condition: service_started
     networks:
-      - veridt-net
+      veridt-net:
+        # IP fixo: o backend só confia no X-Forwarded-For vindo deste endereço (TRUSTED_PROXIES).
+        ipv4_address: 172.28.0.10
 
 volumes:
   postgres_data:
@@ -119,3 +124,7 @@ volumes:
 networks:
   veridt-net:
     driver: bridge
+    # Sub-rede fixa para o IP do frontend. Mudou a rede? Rode `docker compose down` antes do próximo `up`.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
